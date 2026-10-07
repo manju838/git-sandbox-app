@@ -1149,23 +1149,31 @@ class Sandbox:
             else:
                 revs.append(a)
             i += 1
-        if len(revs) != 1:
-            raise GitError("usage: git revert [-n] [-m <parent>] <commit>")
+        if not revs:
+            raise GitError("usage: git revert [-n] [-m <parent>] <commit>...")
 
         self._require_clean("revert")
-        target = self.commits[self.resolve(revs[0])]
-        if len(target.parents) > 1 and "-m" not in args and "--mainline" not in args:
-            raise GitError(
-                f"error: commit {target.id} is a merge but no -m option was given.\n"
-                "hint: use 'git revert -m 1 <commit>' to undo the merge relative to its first parent."
-            )
-        parent_tree = (
-            self.commits[target.parents[parent_number - 1]].tree if target.parents else {}
-        )
-        result = merge_trees(target.tree, self.head_tree, parent_tree, f"parent of {target.id}")
+        # Like git, resolve every revision up front: HEAD moves while we commit.
+        targets = [self.commits[self.resolve(r)] for r in revs]
+        for target in targets:
+            if len(target.parents) > 1 and "-m" not in args and "--mainline" not in args:
+                raise GitError(
+                    f"error: commit {target.id} is a merge but no -m option was given.\n"
+                    "hint: use 'git revert -m 1 <commit>' to undo the merge relative to its first parent."
+                )
+        out = [self._revert_one(t, parent_number, no_commit) for t in targets]
+        return "\n".join(part for part in out if part)
+
+    def _revert_one(self, target: Commit, parent_number: int, no_commit: bool) -> str:
+        if target.parents and not 1 <= parent_number <= len(target.parents):
+            raise GitError(f"error: commit {target.id} does not have parent {parent_number}")
+        parent_tree = self.commits[target.parents[parent_number - 1]].tree if target.parents else {}
+        # "ours" is the index: it equals HEAD, or HEAD plus earlier `revert -n` steps.
+        ours = dict(self.index)
+        result = merge_trees(target.tree, ours, parent_tree, f"parent of {target.id}")
         message = f'Revert "{target.message}"'
 
-        if result.worktree == self.head_tree and not result.conflicts:
+        if result.worktree == ours and not result.conflicts:
             raise GitError(f"error: nothing to revert - the changes of {target.id} are already undone.")
         self._guard_untracked(p for p in result.worktree if p not in self.index)
         self._apply_merge_result(result)
@@ -1186,7 +1194,7 @@ class Sandbox:
         return f"[{self.head_branch or 'detached HEAD'} {new.id}] {message}"
 
     def _apply_merge_result(self, result: MergeResult) -> None:
-        touched = set(self.head_tree) | set(result.worktree)
+        touched = set(self.head_tree) | set(self.index) | set(result.worktree)
         for path in touched:
             if path in result.worktree:
                 self.wd[path] = result.worktree[path]
@@ -1299,6 +1307,12 @@ class Sandbox:
         if len(positional) > 1:
             branch = positional[1].split(":")[-1]
             source_name = positional[1].split(":")[0]
+            if source_name == "HEAD":  # `git push -u origin HEAD`
+                if not self.head_branch:
+                    raise GitError("fatal: You are not currently on a branch.")
+                source_name = self.head_branch
+                if branch == "HEAD":
+                    branch = self.head_branch
         else:
             if not self.head_branch:
                 raise GitError("fatal: You are not currently on a branch.")

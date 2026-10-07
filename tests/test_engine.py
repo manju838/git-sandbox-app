@@ -160,39 +160,161 @@ def test_reflog_recovery():
     assert sb.head_commit.message == "c1"
 
 
-def test_every_exercise_loads_unsolved_and_has_a_solution():
-    solutions = {
-        "unstaged_undo": ["git restore app.py"],
-        "staged_undo": ["git restore --staged app.py"],
-        "reset_soft": ["git reset --soft HEAD~1"],
-        "reset_hard": ["git reset --hard HEAD~1"],
-        "reflog_recover": [],  # needs the lost hash, handled below
-        "revert_pushed": ["git revert HEAD", "git push"],
-        "merge_clean": ["git merge feature/login"],
-        "merge_conflict": [
-            "git merge feature/theme",
-            'echo "color=blue\\nsize=small" > config.txt',
-            "git add config.txt",
-            'git commit -m "Merge theme"',
-        ],
-        "push_rejected": ["git pull", "git push"],
-    }
+def _hash_of(lab: Lab, message: str) -> str:
+    return next(c.id for c in lab.sandbox.commits.values() if c.message == message)
+
+
+# One known-good solution per scenario. A callable receives the Lab to look up commit hashes.
+SOLUTIONS = {
+    "unstaged_undo": ["git restore app.py"],
+    "staged_undo": ["git restore --staged app.py"],
+    "discard_one_of_two": ["git restore --staged --worktree app.py"],
+    "amend_forgotten_file": ["git add helper.py", "git commit --amend --no-edit"],
+    "reset_soft": ["git reset --soft HEAD~1"],
+    "reset_mixed": ["git reset HEAD~1"],
+    "reset_hard": ["git reset --hard HEAD~1"],
+    "trio_soft": ["git reset --soft HEAD~1"],
+    "trio_mixed": ["git reset --mixed HEAD~1"],
+    "trio_hard": ["git reset --hard HEAD~1"],
+    "reset_to_hash": lambda lab: [f"git reset --hard {_hash_of(lab, 'Step 1')}"],
+    "reset_path": ["git reset HEAD~1 -- config.txt"],
+    "reflog_recover": lambda lab: [f"git reset --hard {_hash_of(lab, 'Add feature B')}"],
+    "squash_soft": ["git reset --soft main", 'git commit -m "Add search"'],
+    "revert_pushed": ["git revert HEAD", "git push"],
+    "revert_middle": ["git revert HEAD~1", "git push"],
+    "revert_range": ["git revert -n HEAD HEAD~1", 'git commit -m "Revert bad work"', "git push"],
+    "revert_conflict": [
+        "git revert HEAD~1",
+        'echo "mode=staging\\ndebug=false" > settings.txt',
+        "git add settings.txt",
+        "git commit",
+    ],
+    "revert_merge": ["git revert -m 1 HEAD", "git push"],
+    "merge_ff": ["git merge feature/nav"],
+    "merge_no_ff": ["git merge --no-ff feature/nav"],
+    "merge_clean": ["git merge feature/login"],
+    "merge_conflict": [
+        "git merge feature/theme",
+        'echo "color=blue\\nsize=small" > config.txt',
+        "git add config.txt",
+        'git commit -m "Merge theme"',
+    ],
+    "merge_abort": ["git merge --abort"],
+    "merge_two_conflicts": [
+        "git merge feature/x",
+        'echo "A=main" > a.txt',
+        'echo "B=feature" > b.txt',
+        "git add .",
+        'git commit -m "Merge feature/x"',
+    ],
+    "merge_dirty_tree": ['git commit -am "Update README"', "git merge feature/x"],
+    "merge_undo_local": ["git reset --hard HEAD~1"],
+    "branch_into_feature": ["git merge main"],
+    "branch_ff_from_feature": ["git merge main"],
+    "branch_reset_on_feature": ["git reset --hard HEAD~1"],
+    "branch_reset_on_main_shared": ["git reset --hard HEAD~1"],
+    "branch_revert_on_feature": ["git revert HEAD", "git switch main", "git merge feature/ui"],
+    "branch_revert_on_main": ["git revert HEAD^2", "git push"],
+    "branch_move_edit": ["git switch feature/search", 'git commit -m "Add search"'],
+    "push_rejected": ["git pull", "git push"],
+    "pull_conflict": [
+        "git pull",
+        'echo "mine\\ntheirs" > notes.txt',
+        "git add notes.txt",
+        "git commit",
+        "git push",
+    ],
+    "publish_feature": ["git push -u origin feature/cart"],
+    "fetch_merge_feature": ["git fetch", "git merge origin/main"],
+    "force_push_private": ["git reset --hard HEAD~1", "git push --force"],
+}
+
+
+def _solve(lab: Lab, exercise_id: str) -> None:
+    lab.load(exercise_id)
+    commands = SOLUTIONS[exercise_id]
+    for command in commands(lab) if callable(commands) else commands:
+        lab.run(command)
+
+
+def test_every_exercise_has_a_solution_and_starts_unsolved():
+    assert {e.id for e in EXERCISES if e.check} == set(SOLUTIONS)
     lab = Lab()
     for exercise in EXERCISES:
         lab.load(exercise.id)
-        payload = lab.payload()
+        solved = lab.payload()["exercise"]["solved"]
         if exercise.check is None:
-            assert payload["exercise"]["solved"] is None
-            continue
-        assert payload["exercise"]["solved"] is False, exercise.id
-        if exercise.id == "reflog_recover":
-            lost = next(c.id for c in lab.sandbox.commits.values() if c.message == "Add feature B")
-            commands = [f"git reset --hard {lost}"]
+            assert solved is None
         else:
-            commands = solutions[exercise.id]
-        for command in commands:
-            lab.run(command)
-        assert lab.payload()["exercise"]["solved"] is True, exercise.id
+            assert solved is False, f"{exercise.id} is already solved when loaded"
+            _solve(lab, exercise.id)
+            assert lab.payload()["exercise"]["solved"] is True, f"{exercise.id} not solved by its solution"
+
+
+def test_exercise_setups_run_without_errors():
+    import re
+
+    bad = re.compile(r"^(error|fatal|\S+: command not found)", re.IGNORECASE)
+    for exercise in EXERCISES:
+        sb = Sandbox()
+        for command in exercise.setup:
+            out = sb.run(command)
+            assert not bad.match(out), f"{exercise.id}: '{command}' -> {out}"
+
+
+def test_reset_trio_goals_are_mutually_exclusive():
+    """Each --soft/--mixed/--hard result must satisfy only its own scenario."""
+    modes = {"trio_soft": "--soft", "trio_mixed": "--mixed", "trio_hard": "--hard"}
+    for solved_id, flag in modes.items():
+        lab = Lab()
+        lab.load(solved_id)
+        lab.run(f"git reset {flag} HEAD~1")
+        for other_id in modes:
+            lab.exercise = next(e for e in EXERCISES if e.id == other_id)
+            assert lab.payload()["exercise"]["solved"] is (other_id == solved_id), (flag, other_id)
+
+
+def test_merge_direction_changes_which_branch_moves():
+    lab = Lab()
+    lab.load("branch_into_feature")  # on feature/profile
+    main_before = lab.sandbox.branches["main"]
+    lab.run("git merge main")
+    assert lab.sandbox.branches["main"] == main_before
+
+    lab.load("merge_clean")  # on main
+    feature_before = lab.sandbox.branches["feature/login"]
+    lab.run("git merge feature/login")
+    assert lab.sandbox.branches["feature/login"] == feature_before
+    assert lab.sandbox.branches["main"] == lab.sandbox.head_id
+
+
+def test_reset_on_main_leaves_shared_commit_reachable_from_feature():
+    lab = Lab()
+    lab.load("branch_reset_on_main_shared")
+    oops = _hash_of(lab, "Oops: debug code")
+    lab.run("git reset --hard HEAD~1")
+    assert oops not in lab.sandbox.ancestors(lab.sandbox.branches["main"])
+    assert oops in lab.sandbox.ancestors(lab.sandbox.branches["feature/ui"])
+
+
+def test_revert_multiple_commits_in_one_command_makes_one_commit_each():
+    sb = Sandbox()
+    commit_file(sb, "a.txt", "a", "A")
+    commit_file(sb, "b.txt", "b", "B")
+    before = sb.head_id
+    out = run(sb, "git revert HEAD HEAD~1")
+    assert "error" not in out
+    assert "a.txt" not in sb.head_tree and "b.txt" not in sb.head_tree
+    assert sb.commits[sb.commits[sb.head_id].parents[0]].parents == [before]
+
+
+def test_push_head_publishes_current_branch():
+    sb = Sandbox()
+    run(sb, "git switch -c feature/x")
+    commit_file(sb, "x.txt", "x", "x")
+    run(sb, "git push -u origin HEAD")
+    assert sb.remote_branches["feature/x"] == sb.head_id
+    assert sb.upstream["feature/x"] == "origin/feature/x"
 
 
 def test_snapshot_is_json_serialisable():

@@ -25,7 +25,7 @@ def dashboard() -> str:
 
 @app.get("/api/exercises")
 def list_exercises() -> list[dict]:
-    return [{"id": e.id, "title": e.title, "area": e.area} for e in EXERCISES]
+    return [{"id": e.id, "group": e.group, "title": e.title, "area": e.area} for e in EXERCISES]
 
 
 @app.get("/api/state")

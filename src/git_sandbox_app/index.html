@@ -29,6 +29,22 @@
   .ex-btn:hover { border-color: var(--accent); }
   .ex-btn.active { border-color: var(--accent); background: #12365a; }
   .ex-btn small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .ex-btn { position: relative; padding-right: 26px; font-size: 13px; }
+  .ex-btn .tick { position: absolute; right: 9px; top: 8px; color: var(--green); font-weight: 700; }
+  .ex-btn.done { border-color: #1f5b3a; }
+  #exercise-list { max-height: 58vh; overflow-y: auto; padding-right: 4px; }
+  * { scrollbar-color: #3a4d72 transparent; scrollbar-width: thin; }
+  .grp { display: flex; justify-content: space-between; margin: 12px 0 6px; font-size: 11.5px; font-weight: 700;
+         color: var(--amber); text-transform: uppercase; letter-spacing: .04em; }
+  .grp span { color: var(--muted); }
+  .progress-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .link { background: none; border: none; color: var(--muted); text-decoration: underline; font-size: 11px; padding: 0; }
+  .bar { height: 6px; background: #0f1828; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+  .bar div { height: 100%; width: 0; background: var(--green); transition: width .3s; }
+  #takeaway { display: none; margin-top: 10px; font-size: 12.5px; line-height: 1.45; color: #bbf7d0; background: #0e2a1b;
+              border: 1px solid #1f5b3a; border-radius: 6px; padding: 8px 10px; }
+  #takeaway .next { display: block; margin-top: 8px; background: var(--green); color: #04210f; border: none; border-radius: 6px;
+                    padding: 5px 10px; font-weight: 700; text-align: left; }
   .danger { background: #4c1d2b; color: #fda4af; border: 1px solid #7f2a41; border-radius: 6px; padding: 6px 12px; }
   .danger:hover { background: #6b2539; }
 
@@ -100,6 +116,8 @@
   <aside class="stack">
     <section class="panel">
       <h3>Scenarios</h3>
+      <div class="progress-row"><span id="progress"></span><button class="link" onclick="resetProgress()">reset progress</button></div>
+      <div class="bar"><div id="progress-bar"></div></div>
       <div id="exercise-list"></div>
     </section>
     <section class="panel">
@@ -109,6 +127,7 @@
       <p id="goal-desc"></p>
       <button id="hint-btn" onclick="toggleHint()">Show hint</button>
       <div id="hint-text"></div>
+      <div id="takeaway"></div>
     </section>
     <section class="panel">
       <h3>Reflog (where HEAD has been)</h3>
@@ -225,10 +244,42 @@ $('term-in').addEventListener('keydown', async (e) => {
   }
 });
 
+const STORE_KEY = 'gitSandboxSolved';
+let exercises = [];
+let solvedSet = new Set(JSON.parse(localStorage.getItem(STORE_KEY) || '[]'));
+
+function renderExerciseList() {
+  const goals = exercises.filter((e) => e.group !== 'Free play');
+  const done = goals.filter((e) => solvedSet.has(e.id)).length;
+  $('progress').textContent = `${done} / ${goals.length} solved`;
+  $('progress-bar').style.width = `${goals.length ? (100 * done) / goals.length : 0}%`;
+
+  const groups = [];
+  for (const e of exercises) {
+    let g = groups.find((x) => x.name === e.group);
+    if (!g) groups.push((g = { name: e.group, items: [] }));
+    g.items.push(e);
+  }
+  $('exercise-list').innerHTML = groups.map((g) => {
+    const n = g.items.filter((e) => solvedSet.has(e.id)).length;
+    const head = g.name === 'Free play' ? '' :
+      `<div class="grp">${esc(g.name)}<span>${n}/${g.items.length}</span></div>`;
+    return head + g.items.map((e) =>
+      `<button class="ex-btn ${solvedSet.has(e.id) ? 'done' : ''} ${e.id === currentId ? 'active' : ''}" id="ex-${e.id}" onclick="loadExercise('${e.id}')">` +
+      `<span class="tick">${solvedSet.has(e.id) ? '\u2713' : ''}</span>${esc(e.title)}<small>${esc(e.area)}</small></button>`).join('');
+  }).join('');
+}
+
 async function loadExercises() {
-  const list = await api('/api/exercises');
-  $('exercise-list').innerHTML = list.map((e) =>
-    `<button class="ex-btn" id="ex-${e.id}" onclick="loadExercise('${e.id}')">${esc(e.title)}<small>${esc(e.area)}</small></button>`).join('');
+  exercises = await api('/api/exercises');
+  renderExerciseList();
+}
+
+function resetProgress() {
+  if (!confirm('Clear your solved-scenario progress?')) return;
+  solvedSet = new Set();
+  localStorage.removeItem(STORE_KEY);
+  renderExerciseList();
 }
 
 async function loadExercise(id) {
@@ -255,7 +306,14 @@ function apply(data) {
   state = data.state;
   const ex = data.exercise;
   currentId = ex.id;
-  document.querySelectorAll('.ex-btn').forEach((b) => b.classList.toggle('active', b.id === 'ex-' + ex.id));
+  if (ex.solved && !solvedSet.has(ex.id)) {
+    solvedSet.add(ex.id);
+    localStorage.setItem(STORE_KEY, JSON.stringify([...solvedSet]));
+  }
+  renderExerciseList();
+  const active = document.querySelector('.ex-btn.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+
   const badge = $('badge');
   if (ex.solved === null) { badge.className = 'badge free'; badge.textContent = 'Free play'; }
   else if (ex.solved) { badge.className = 'badge solved'; badge.textContent = 'Solved!'; }
@@ -263,6 +321,15 @@ function apply(data) {
   $('goal-title').textContent = ex.title;
   $('goal-desc').textContent = ex.description;
   $('hint-text').textContent = ex.hint;
+
+  const box = $('takeaway');
+  if (ex.solved) {
+    const idx = exercises.findIndex((e) => e.id === ex.id);
+    const next = exercises[idx + 1];
+    box.style.display = 'block';
+    box.innerHTML = `<b>What you learned</b><br>${esc(ex.takeaway)}` +
+      (next ? `<br><button class="next" onclick="loadExercise('${next.id}')">Next: ${esc(next.title)} &rarr;</button>` : '');
+  } else box.style.display = 'none';
   render();
 }
 
