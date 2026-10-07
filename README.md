@@ -11,6 +11,8 @@ uv run git-sandbox-app        # or: .venv\Scripts\git-sandbox-app
 
 Then open <http://127.0.0.1:8000>.
 
+![Preview](./assets/preview.png)
+
 ## How it works
 
 - `engine.py` - a deterministic in-memory simulation of git (add, commit, reset, revert, merge with real
