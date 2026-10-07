@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git Sandbox - practice merge, revert &amp; reset visually</title>
+<style>
+  :root {
+    --bg: #0b1220; --surface: #162033; --surface2: #1d2a42; --border: #2b3a57;
+    --text: #e8eefc; --muted: #8fa0c0; --accent: #38bdf8;
+    --green: #22c55e; --red: #f43f5e; --amber: #f59e0b; --purple: #a78bfa; --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  code, pre, .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  header { padding: 14px 24px; border-bottom: 1px solid var(--border); display: flex;
+           justify-content: space-between; align-items: center; gap: 16px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 16px; padding: 16px 24px; max-width: 1700px; margin: 0 auto; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .panel h3 { margin: 0 0 10px; font-size: 14px; color: var(--accent); text-transform: uppercase; letter-spacing: .05em; }
+  .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  button { font: inherit; cursor: pointer; }
+  .ex-btn { display: block; width: 100%; text-align: left; background: var(--surface2); color: var(--text);
+            border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+  .ex-btn:hover { border-color: var(--accent); }
+  .ex-btn.active { border-color: var(--accent); background: #12365a; }
+  .ex-btn small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .danger { background: #4c1d2b; color: #fda4af; border: 1px solid #7f2a41; border-radius: 6px; padding: 6px 12px; }
+  .danger:hover { background: #6b2539; }
+
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .badge.free { background: #334155; color: #cbd5e1; }
+  .badge.progress { background: var(--amber); color: #1c1400; }
+  .badge.solved { background: var(--green); color: #04210f; }
+  #goal-title { margin: 10px 0 4px; font-weight: 600; }
+  #goal-desc { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 0; }
+  #hint-btn { margin-top: 10px; background: none; border: 1px dashed var(--border); color: var(--muted); border-radius: 6px; padding: 4px 10px; font-size: 12px; }
+  #hint-text { display: none; margin-top: 8px; font-size: 12.5px; color: #fde68a; background: #2b2410; border-radius: 6px; padding: 8px; }
+
+  /* four areas */
+  .areas { display: grid; grid-template-columns: 1fr 78px 1fr 78px 1fr 78px 1fr; align-items: stretch; }
+  .area { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 170px; min-width: 0; }
+  .area h4 { margin: 0 0 2px; font-size: 14px; }
+  .area .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; min-height: 28px; }
+  .area.wd h4 { color: #fda4af; } .area.idx h4 { color: #86efac; }
+  .area.loc h4 { color: var(--blue); } .area.rem h4 { color: var(--purple); }
+  .arrows { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; font-size: 10.5px; color: var(--muted); text-align: center; padding: 0 2px; }
+  .arrows b { display: block; color: var(--accent); font-weight: 600; }
+  .arrows .back b { color: var(--amber); }
+  .file { background: #0f1828; border: 1px solid var(--border); border-left-width: 4px; border-radius: 6px; padding: 5px 8px; margin-bottom: 6px; }
+  .file .name { display: flex; justify-content: space-between; gap: 6px; font-size: 12.5px; }
+  .file pre { margin: 4px 0 0; font-size: 11px; color: var(--muted); white-space: pre-wrap; word-break: break-all; max-height: 70px; overflow: auto; }
+  .file.clean { opacity: .6; }
+  .file.untracked, .file.added { border-left-color: var(--green); }
+  .file.modified { border-left-color: var(--amber); }
+  .file.deleted { border-left-color: var(--red); }
+  .file.conflict { border-left-color: var(--red); background: #2a1220; }
+  .tag { font-size: 10px; border-radius: 4px; padding: 1px 5px; background: #334155; color: #cbd5e1; align-self: center; }
+  .empty { color: var(--muted); font-size: 12px; font-style: italic; }
+
+  /* terminal */
+  .terminal { background: #000; border-radius: 8px; padding: 10px 12px; box-shadow: inset 0 0 12px #000; }
+  #term-out { height: 230px; overflow-y: auto; white-space: pre-wrap; color: #a3e635; font-size: 13px; line-height: 1.4; margin-bottom: 8px; }
+  #term-out .cmd { color: #7dd3fc; } #term-out .err { color: #fca5a5; }
+  .term-row { display: flex; gap: 8px; align-items: center; }
+  .term-row span { color: var(--accent); font-weight: 700; }
+  #term-in { flex: 1; background: transparent; border: none; outline: none; color: #fff; font-size: 14px; font-family: inherit; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+  .chip:hover { border-color: var(--accent); }
+
+  /* graphs */
+  .graph-wrap { overflow-x: auto; background: #0f1828; border: 1px dashed var(--border); border-radius: 8px; }
+  .graph-wrap svg { display: block; }
+  .graph-wrap text { font-family: "Cascadia Code", Consolas, monospace; }
+  .node { cursor: pointer; }
+  .banner { background: #4c1d2b; border: 1px solid #7f2a41; color: #fecdd3; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: none; }
+  #inspector { margin-top: 10px; font-size: 12.5px; }
+  #inspector pre { background: #0f1828; border-radius: 6px; padding: 6px 8px; margin: 4px 0 8px; color: var(--muted); font-size: 11.5px; white-space: pre-wrap; }
+  .reflog { font-size: 12px; color: var(--muted); max-height: 140px; overflow-y: auto; }
+  .reflog div { padding: 1px 0; }
+  .reflog b { color: var(--amber); font-weight: 600; }
+  @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } .areas { grid-template-columns: 1fr 1fr; gap: 10px; } .arrows { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Git Sandbox</h1>
+    <p>Practice merge, revert and reset across the working directory, staging area, local repo and remote repo.</p>
+  </div>
+  <button class="danger" onclick="loadExercise(currentId)">Restart this scenario</button>
+</header>
+
+<div class="layout">
+  <aside class="stack">
+    <section class="panel">
+      <h3>Scenarios</h3>
+      <div id="exercise-list"></div>
+    </section>
+    <section class="panel">
+      <h3>Goal</h3>
+      <span id="badge" class="badge free">Free play</span>
+      <div id="goal-title"></div>
+      <p id="goal-desc"></p>
+      <button id="hint-btn" onclick="toggleHint()">Show hint</button>
+      <div id="hint-text"></div>
+    </section>
+    <section class="panel">
+      <h3>Reflog (where HEAD has been)</h3>
+      <div class="reflog" id="reflog"></div>
+    </section>
+  </aside>
+
+  <main class="stack">
+    <div class="banner" id="banner"></div>
+
+    <section class="areas">
+      <div class="area wd"><h4>Working directory</h4><div class="sub">Files on disk. Edit them here.</div><div id="wd-files"></div></div>
+      <div class="arrows">
+        <div><b>git add</b>&rarr;</div>
+        <div class="back">&larr;<b>git restore &lt;file&gt;</b></div>
+      </div>
+      <div class="area idx"><h4>Staging area</h4><div class="sub">What the next commit will contain.</div><div id="idx-files"></div></div>
+      <div class="arrows">
+        <div><b>git commit</b>&rarr;</div>
+        <div class="back">&larr;<b>git restore --staged</b><b>git reset</b></div>
+      </div>
+      <div class="area loc"><h4>Local repository</h4><div class="sub" id="loc-sub"></div><div id="loc-files"></div></div>
+      <div class="arrows">
+        <div><b>git push</b>&rarr;</div>
+        <div class="back">&larr;<b>git fetch</b><b>git pull</b></div>
+      </div>
+      <div class="area rem"><h4>Remote repository</h4><div class="sub" id="rem-sub"></div><div id="rem-files"></div></div>
+    </section>
+
+    <section class="panel">
+      <h3>Terminal</h3>
+      <div class="terminal">
+        <div id="term-out"></div>
+        <div class="term-row"><span>$</span>
+          <input id="term-in" class="mono" autocomplete="off" spellcheck="false" autofocus
+                 placeholder='try: echo "hello" > a.txt   |   git status   |   help'>
+        </div>
+      </div>
+      <div class="chips" id="chips"></div>
+    </section>
+
+    <section class="panel">
+      <h3>Local repository - commit graph (click a commit to inspect it)</h3>
+      <div class="graph-wrap" id="local-graph"></div>
+      <div id="inspector"></div>
+    </section>
+
+    <section class="panel">
+      <h3>Remote repository (origin) - commit graph</h3>
+      <div class="graph-wrap" id="remote-graph"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let currentId = 'sandbox';
+let state = null;
+let selected = null;
+const history = [];
+let historyPos = 0;
+
+const CHIPS = [
+  'git status', 'git log --oneline --all', 'git diff', 'git diff --staged', 'git add .',
+  'git commit -m "message"', 'git reset --soft HEAD~1', 'git reset --hard HEAD~1', 'git revert HEAD',
+  'git restore --staged <file>', 'git switch -c feature', 'git merge feature', 'git push', 'git pull',
+  'git reflog', 'teammate notes.txt "hello"', 'help',
+];
+$('chips').innerHTML = CHIPS.map((c) => `<button class="chip mono" data-cmd="${esc(c)}">${esc(c)}</button>`).join('');
+$('chips').addEventListener('click', (e) => {
+  const cmd = e.target.dataset && e.target.dataset.cmd;
+  if (cmd) { $('term-in').value = cmd; $('term-in').focus(); }
+});
+
+function print(text, cls) {
+  const out = $('term-out');
+  const div = document.createElement('div');
+  if (cls) div.className = cls;
+  div.textContent = text;
+  out.appendChild(div);
+  out.scrollTop = out.scrollHeight;
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+$('term-in').addEventListener('keydown', async (e) => {
+  if (e.key === 'ArrowUp') { if (historyPos > 0) $('term-in').value = history[--historyPos]; e.preventDefault(); return; }
+  if (e.key === 'ArrowDown') {
+    if (historyPos < history.length - 1) $('term-in').value = history[++historyPos];
+    else { historyPos = history.length; $('term-in').value = ''; }
+    e.preventDefault(); return;
+  }
+  if (e.key !== 'Enter') return;
+  const cmd = $('term-in').value.trim();
+  if (!cmd) return;
+  $('term-in').value = '';
+  history.push(cmd); historyPos = history.length;
+  if (cmd === 'clear') { $('term-out').innerHTML = ''; return; }
+  print('$ ' + cmd, 'cmd');
+  try {
+    const data = await api('/api/command', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmd }),
+    });
+    if (data.output) print(data.output, /^(error|fatal)/m.test(data.output) ? 'err' : '');
+    apply(data);
+  } catch (err) {
+    print('Could not reach the sandbox server: ' + err.message, 'err');
+  }
+});
+
+async function loadExercises() {
+  const list = await api('/api/exercises');
+  $('exercise-list').innerHTML = list.map((e) =>
+    `<button class="ex-btn" id="ex-${e.id}" onclick="loadExercise('${e.id}')">${esc(e.title)}<small>${esc(e.area)}</small></button>`).join('');
+}
+
+async function loadExercise(id) {
+  currentId = id;
+  selected = null;
+  const data = await api(`/api/exercise/${id}`, { method: 'POST' });
+  $('term-out').innerHTML = '';
+  print(`--- Loaded scenario: ${data.exercise.title} ---`, 'cmd');
+  print("Type git commands below. 'help' lists what is supported.");
+  $('hint-text').style.display = 'none';
+  $('hint-btn').textContent = 'Show hint';
+  apply(data);
+  $('term-in').focus();
+}
+
+function toggleHint() {
+  const box = $('hint-text');
+  const show = box.style.display === 'none' || !box.style.display;
+  box.style.display = show ? 'block' : 'none';
+  $('hint-btn').textContent = show ? 'Hide hint' : 'Show hint';
+}
+
+function apply(data) {
+  state = data.state;
+  const ex = data.exercise;
+  currentId = ex.id;
+  document.querySelectorAll('.ex-btn').forEach((b) => b.classList.toggle('active', b.id === 'ex-' + ex.id));
+  const badge = $('badge');
+  if (ex.solved === null) { badge.className = 'badge free'; badge.textContent = 'Free play'; }
+  else if (ex.solved) { badge.className = 'badge solved'; badge.textContent = 'Solved!'; }
+  else { badge.className = 'badge progress'; badge.textContent = 'In progress'; }
+  $('goal-title').textContent = ex.title;
+  $('goal-desc').textContent = ex.description;
+  $('hint-text').textContent = ex.hint;
+  render();
+}
+
+function fileCards(files, emptyText, bright) {
+  if (!files.length) return `<div class="empty">${esc(emptyText)}</div>`;
+  return files.map((f) => `
+    <div class="file ${f.status === 'clean' && bright ? '' : f.status}">
+      <div class="name"><span class="mono">${esc(f.name)}</span>${f.status === 'clean' ? '' : `<span class="tag">${f.status}</span>`}</div>
+      ${f.status === 'deleted' ? '' : `<pre>${esc(f.content) || '&nbsp;'}</pre>`}
+    </div>`).join('');
+}
+
+function treeCards(tree, emptyText) {
+  const names = Object.keys(tree).sort();
+  return fileCards(names.map((n) => ({ name: n, content: tree[n], status: 'clean' })), emptyText, true);
+}
+
+function render() {
+  const s = state;
+  $('wd-files').innerHTML = fileCards(s.working, 'Empty directory');
+  $('idx-files').innerHTML = fileCards(s.staging, 'Nothing staged');
+
+  const headNode = s.local.find((n) => n.id === s.head.id);
+  $('loc-sub').innerHTML = s.head.detached
+    ? `HEAD detached at <b class="mono">${s.head.id}</b>`
+    : `HEAD &rarr; <b class="mono">${esc(s.head.branch)}</b> @ <span class="mono">${s.head.id}</span><br>${esc(headNode.message)}`;
+  $('loc-files').innerHTML = treeCards(headNode.tree, 'No files');
+
+  const remoteMain = s.remote.find((n) => n.refs.some((r) => r.name === 'main'));
+  $('rem-sub').innerHTML = remoteMain
+    ? `<b class="mono">origin/main</b> @ <span class="mono">${remoteMain.id}</span><br>${esc(remoteMain.message)}`
+    : 'No commits pushed yet';
+  $('rem-files').innerHTML = remoteMain ? treeCards(remoteMain.tree, 'No files') : '';
+
+  const banner = $('banner');
+  if (s.pending) {
+    const left = s.conflicts.length;
+    banner.style.display = 'block';
+    banner.innerHTML = `<b>${s.pending} in progress.</b> ` + (left
+      ? `Conflicts in: <span class="mono">${s.conflicts.map(esc).join(', ')}</span>. Edit the file(s), run <code>git add</code>, then <code>git commit</code> - or <code>git ${s.pending} --abort</code>.`
+      : `All conflicts resolved - run <code>git commit</code> to finish, or <code>git ${s.pending} --abort</code>.`);
+  } else banner.style.display = 'none';
+
+  drawGraph($('local-graph'), s.local, true);
+  drawGraph($('remote-graph'), s.remote, false);
+  renderInspector();
+
+  $('reflog').innerHTML = s.reflog.map((r, i) =>
+    `<div><b class="mono">${r.id}</b> HEAD@{${i}}: ${esc(r.reason)}</div>`).join('');
+}
+
+const LANE_COLORS = ['#38bdf8', '#f59e0b', '#a78bfa', '#34d399', '#f472b6', '#fb923c'];
+const COL_W = 104, LANE_H = 118, PAD_X = 56, PAD_Y = 74;
+
+function pill(x, y, text, fill, stroke, color) {
+  const w = text.length * 6.6 + 12;
+  return `<rect x="${x - w / 2}" y="${y - 12}" width="${w}" height="16" rx="8" fill="${fill}" stroke="${stroke}"/>` +
+         `<text x="${x}" y="${y}" font-size="10.5" text-anchor="middle" fill="${color}">${esc(text)}</text>`;
+}
+
+function drawGraph(el, nodes, isLocal) {
+  if (!nodes.length) { el.innerHTML = '<div class="empty" style="padding:12px">No commits</div>'; return; }
+  const lanes = Math.max(...nodes.map((n) => n.lane)) + 1;
+  const width = PAD_X * 2 + (nodes.length - 1) * COL_W;
+  const height = PAD_Y + (lanes - 1) * LANE_H + 60;
+  const pos = Object.fromEntries(nodes.map((n) => [n.id, { x: PAD_X + n.col * COL_W, y: PAD_Y + n.lane * LANE_H }]));
+
+  let edges = '', body = '';
+  for (const n of nodes) {
+    n.parents.forEach((pid, i) => {
+      const a = pos[pid], b = pos[n.id];
+      if (!a) return;
+      const color = LANE_COLORS[(i === 0 ? n.lane : nodes.find((m) => m.id === pid).lane) % LANE_COLORS.length];
+      const d = a.y === b.y ? `M${a.x},${a.y} L${b.x},${b.y}`
+        : `M${a.x},${a.y} C${a.x + 40},${a.y} ${b.x - 40},${b.y} ${b.x},${b.y}`;
+      edges += `<path d="${d}" fill="none" stroke="${color}" stroke-width="3" ${i ? 'stroke-dasharray="6 4"' : ''} opacity=".85"/>`;
+    });
+  }
+
+  for (const n of nodes) {
+    const { x, y } = pos[n.id];
+    const color = LANE_COLORS[n.lane % LANE_COLORS.length];
+    const isHead = isLocal && n.id === state.head.id;
+    const pills = [];
+    for (const r of n.refs) {
+      if (r.type === 'head') { if (state.head.detached) pills.push(['HEAD', '#4a2a05', '#f59e0b', '#fcd34d']); }
+      else if (r.type === 'remote') pills.push([r.name, '#2a2150', '#a78bfa', '#ddd6fe']);
+      else if (r.current) pills.push(['HEAD \u2192 ' + r.name, '#4a2a05', '#f59e0b', '#fcd34d']);
+      else pills.push([r.name, '#10331f', '#22c55e', '#bbf7d0']);
+    }
+    pills.forEach((p, k) => { body += pill(x, y - 24 - k * 20, p[0], p[1], p[2], p[3]); });
+    const msg = n.message.length > 15 ? n.message.slice(0, 14) + '\u2026' : n.message;
+    const merge = n.parents.length > 1;
+    body += `<g class="node" data-id="${n.id}">
+      ${isHead ? `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="#f59e0b" stroke-width="2"/>` : ''}
+      ${n.id === selected ? `<circle cx="${x}" cy="${y}" r="19" fill="none" stroke="#e2e8f0" stroke-dasharray="3 3"/>` : ''}
+      <circle cx="${x}" cy="${y}" r="${merge ? 11 : 9}" fill="${merge ? '#0b1220' : color}" stroke="${color}" stroke-width="3"/>
+      <text x="${x}" y="${y + 30}" font-size="11" text-anchor="middle" fill="#e8eefc">${n.id}</text>
+      <text x="${x}" y="${y + 44}" font-size="10" text-anchor="middle" fill="#8fa0c0">${esc(msg)}</text>
+      <title>${esc(n.message)} (${n.author})</title>
+    </g>`;
+  }
+  el.innerHTML = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${edges}${body}</svg>`;
+  el.scrollLeft = el.scrollWidth;
+  el.querySelectorAll('.node').forEach((g) => g.addEventListener('click', () => { selected = g.dataset.id; render(); }));
+}
+
+function renderInspector() {
+  const box = $('inspector');
+  const node = state.local.find((n) => n.id === selected);
+  if (!node) { box.innerHTML = '<span class="empty">Select a commit to see the files it contains.</span>'; return; }
+  const parents = node.parents.length ? node.parents.join(', ') : 'none (root commit)';
+  box.innerHTML = `<b class="mono">${node.id}</b> - ${esc(node.message)} <span class="empty">(parents: ${parents})</span>` +
+    Object.keys(node.tree).sort().map((n) => `<div class="mono">${esc(n)}</div><pre>${esc(node.tree[n]) || ' '}</pre>`).join('');
+}
+
+(async () => {
+  await loadExercises();
+  await loadExercise('sandbox');
+})();
+</script>
+</body>
+</html>
